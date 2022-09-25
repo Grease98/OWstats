@@ -1,0 +1,324 @@
+Import libraries
+
+```{r}
+
+library(tidyverse)
+library(cluster)
+library(factoextra)
+library(plotly)
+
+```
+
+Import data from folder to main dataframe gigadf
+
+```{r}
+filenames <- list.files(path="C:/Users/thoma/OneDrive/Documents/Overwatch/thegigaset",pattern="*.txt")
+
+print(filenames)
+
+fullpath=file.path("C:/Users/thoma/OneDrive/Documents/Overwatch/thegigaset",filenames)
+
+colnames<-c("Time","Player","Hero","Hero Damage Dealt","Barrier Damage Dealt","Damage Blocked","Damage Taken","Deaths",	"Elims","Kills","Environmental Deaths","Environmental Kills","Healing","Obj Kills","Solo Kills","Ults Earned","Ults Used","Healing Received","Ult charge","Player Closest to reticle","posx","posy","posz","Team","CD1","CD2","Max hp")
+
+gigadf <- do.call("rbind",lapply(fullpath,FUN=function(files){ read.csv(files, header=0, col.names = colnames, encoding = "ANSI")}))
+gigadf <- separate(gigadf, Time, c("Time", "t2"), "\\s(?:.+\\s)?")
+```
+
+Remove event rows
+
+```{r}
+'%!in%' <- function(x,y)!('%in%'(x,y))
+gigadf <- gigadf[gigadf$Player%!in%c('FinalBlow', 'Suicide', 'Resurrected', 'DuplicatingStart', 'DuplicatingEnd'),]
+```
+
+
+```{r}
+gigadf <- cbind(rownumber = rownames(gigadf), gigadf) #add rownumber column
+
+df3 <- gigadf[grepl("^[[:digit:]]+|True|False",gigadf$Player),] #where player column is a number
+df3 <- df3 %>%
+  select(rownumber, Player, Hero) %>%
+  rename(Team1score = Player) %>%
+  rename(Team2score = Hero)
+
+```
+
+
+```{r}
+gdftest <- gigadf
+
+gdftest$t2 = as.numeric(gdftest$t2)
+gdftest$rownumber = as.numeric(gdftest$rownumber)
+
+gdftest <- gdftest %>%
+  na.omit()%>%
+  mutate(across(Hero.Damage.Dealt:Ult.charge, as.numeric))
+```
+
+Fill team score columns with scores
+
+```{r}
+start_time <- Sys.time()
+for (rows in 1:nrow(df3)){
+  r1 <- rows*12-12
+  r2 <- rows*12
+  if(is.na(r2)){
+    r2 <- nrow(gdftest)
+  }
+  team1score <- df3[rows, 2]
+  team2score <- df3[rows, 3]
+  gdftest[r1:r2,30] <- team1score
+  gdftest[r1:r2,31] <- team2score
+  print(r1)
+}
+end_time <- Sys.time() 
+
+timer <- end_time - start_time
+timer
+
+for (rows in 1:nrow(gdftest)){
+  t1s <- gdftest[rows,30]
+  t2s <- gdftest[rows,31]
+  print(rows/nrow(gdftest))
+  if(t1s=="True"){
+    t1s <- 100
+  }
+  if(t1s=="False"){
+    t1s <- 0
+  }
+  if(t2s=="True"){
+    t2s <- 100
+  }
+  if(t2s=="False"){
+    t2s <- 0
+  }
+  t1s <- as.numeric(t1s)
+  t2s <- as.numeric(t2s)
+  
+  if(gdftest[rows, 26]=="Team 1"|gdftest[rows, 26]=="Team Reality"){
+    scorediff <- t1s-t2s
+  }
+  if(gdftest[rows, 26]=="Team 2"|gdftest[rows, 26]=="frog :D"){
+    scorediff <- t2s-t1s
+  }
+  gdftest[rows, 32]<-scorediff
+}
+```
+
+Creating a list of all unique playernames in the dataset.
+This list is iterated through and every time the map ends or a player changes heroes the row is bound to a dataframe.
+```{r}
+namelist <- unique(gdftest$Player)
+
+heroswapsdf <- data.frame(matrix(ncol=32, nrow=0))
+colnames(heroswapsdf) <- colnames32
+
+for(names in 1:length(namelist)){
+megdf <- gdftest %>%
+  na.omit() %>%
+  filter(Player == namelist[names])%>%
+  na.omit()
+print(namelist[names])
+
+newmaptime <- data.frame(matrix(ncol=32, nrow=0))
+colnames(newmaptime) <- colnames32
+
+newmaptime <- rbind(newmaptime, megdf[1,])
+for (rows in 1:(nrow(megdf)-1)){
+  t1 <- megdf[rows,3]
+  t2 <- megdf[rows+1,3]
+  d1 <- megdf[rows,6]
+  d2 <- megdf[rows+1, 6]
+  if (t2<t1|d2<d1){
+    
+    newmaptime <- rbind(newmaptime, megdf[rows,])
+    newmaptime <- rbind(newmaptime, megdf[rows+1,])
+  }
+}
+newmaptime <- rbind(newmaptime, megdf[nrow(megdf),]) 
+
+print(nrow(newmaptime))
+for (map in 1:(nrow(newmaptime)/2)){
+  map0 <- as.numeric(newmaptime[map*2-1, 1]) #map start row
+  map1 <- as.numeric(newmaptime[map*2, 1]) #map end row
+
+memap1 <- data.frame(matrix(ncol=32, nrow=0))
+colnames(memap1) <- colnames32
+
+meddf <- gdftest %>%
+  filter(Player == namelist[names])
+
+ind2b1 <- which(meddf$rownumber==map0)
+ind2b2 <- which(meddf$rownumber==map1)
+
+
+
+memap1 <- memap1 %>%
+  rbind(meddf[ind2b1:ind2b2,])
+  for (rows in 1:(nrow(memap1)-1)){
+    hero0 <- memap1[rows,5]
+    hero1 <- memap1[rows+1, 5]
+    if(rows == 1){
+      heroswapsdf <- rbind(heroswapsdf,memap1[1,])
+    }
+    if (hero0 != hero1){
+      heroswapsdf <- rbind(heroswapsdf, memap1[rows,])
+      heroswapsdf <- rbind(heroswapsdf, memap1[rows+1,])
+    }
+    if(rows == (nrow(memap1)-1)){
+      heroswapsdf <- rbind(heroswapsdf, memap1[(rows)+1,])
+    }
+  }
+}
+
+}
+```
+
+The differences between stats when a hero is first selected and the last second they are played are then calculated.
+
+```{r}
+diffdf <- data.frame(matrix(ncol=17, nrow=0))
+colnamesdiff <- c("player", "hero", "time","dmg","bdmg","blk","dmgtaken","deaths","elims","kills","envkills","healing","objkills", "solokills","ultsearned","ultsused", "scoredf")
+
+colnames(diffdf) <- colnamesdiff
+
+heroswapsdf <- heroswapsdf %>%
+  na.omit()
+
+for(pairs in 1:(nrow(heroswapsdf)/2)){
+  player <- heroswapsdf[pairs*2-1,4]
+  hero <- heroswapsdf[pairs*2-1,5]
+  scorediff <- heroswapsdf[pairs*2-1,32]
+  time <- heroswapsdf[pairs*2,3] - heroswapsdf[pairs*2-1,3]
+  dmg <- heroswapsdf[pairs*2,6] - heroswapsdf[pairs*2-1,6]
+  bdmg <- heroswapsdf[pairs*2,7] - heroswapsdf[pairs*2-1,7]
+  blk <- heroswapsdf[pairs*2,8] - heroswapsdf[pairs*2-1,8]
+  dmgtaken <- heroswapsdf[pairs*2,9] - heroswapsdf[pairs*2-1,9]
+  deaths <- heroswapsdf[pairs*2,10] - heroswapsdf[pairs*2-1,10]
+  elims <- heroswapsdf[pairs*2,11] - heroswapsdf[pairs*2-1,11]
+  kills <- heroswapsdf[pairs*2,12] - heroswapsdf[pairs*2-1,12]
+  envkills <- heroswapsdf[pairs*2,14] - heroswapsdf[pairs*2-1,14]
+  healing <- heroswapsdf[pairs*2,15] - heroswapsdf[pairs*2-1,15]
+  objkills <- heroswapsdf[pairs*2,16] - heroswapsdf[pairs*2-1,16]
+  solokills <- heroswapsdf[pairs*2,17] - heroswapsdf[pairs*2-1,17]
+  ultsearned <- heroswapsdf[pairs*2,18] - heroswapsdf[pairs*2-1,18]
+  ultsused <- heroswapsdf[pairs*2,19] - heroswapsdf[pairs*2-1,19]
+  
+  
+  df <- data.frame(player, hero, time, dmg, bdmg, blk, dmgtaken, deaths, elims, kills, envkills, healing, objkills, solokills, ultsearned, ultsused, scorediff)
+  
+  diffdf <- rbind(diffdf, df)
+  
+}
+
+t1 <- sum(diffdf$time)
+
+diffdf <- diffdf %>%
+  mutate(sdpersec = scorediff/time)%>%
+  filter(sdpersec <= 1) %>%
+  filter(sdpersec >=-1) %>%
+  filter(time >=30) #each instance of time played must be at least 30s to count
+
+t2 <- sum(diffdf$time)
+
+print((t2/t1)*100)
+```
+
+The stats for players with multiple known accounts are then combined.
+
+Stats are then summarised per ten minutes.
+```{r}
+herodf <- diffdf %>%
+
+  
+  mutate(player = replace(player, player == "Myi"|player=="Myu", "Myo"))%>%
+  mutate(player = replace(player, player == "Helmer", "Helmerdrake"))%>%
+  mutate(player = replace(player, player == "D0nghun", "donghun"))%>%
+  mutate(player = replace(player, player == "KIP", "kip"))%>%
+  mutate(player = replace(player, player == "Robloxlover1", "eis"))%>%
+  mutate(player = replace(player, player == "WhoAsked", "CaptainPrash"))%>%
+  mutate(player = replace(player, player == "Ä”Æ‘Æ‘0Å˜Å¦"|player=="Ä”Æ‘Æ‘0È’Å¦", "Effort"))%>%
+  mutate(player = replace(player, player == "AVA"|player=="Eclipse"|player=="vera", "Senna"))%>%
+  mutate(player = replace(player, player == "PÃŠÄœÄœÅ¶Çƒ", "Sonder")) %>%
+  mutate(player = replace(player, player=="Jiro"|player=="XANTARES"|player=="forsaken"|player=="Avo", "Avoria"))%>%
+  mutate(player = replace(player, player=="ADBLOCKER", "sam"))%>%
+  mutate(player = replace(player, player=="Ç€Æ–Ç€Æ–Ç€Æ–Ç€Æ–Ç€Æ–Ç€"|player=="Ç€Ç€Ç€Ç€Ç€Ç€Ç€Ç€Ç€Ç€", "barcode"))%>%
+  mutate(player = replace(player, player=="FakeJake", "Demonoir"))%>%
+  mutate(player = replace(player, player=="FROGASS"|player=="Beatrice"|player=="Gass"|player=="Learn2Play"|player=="RECONÇ¶MODE"|player=="Unarovite"|player=="Ç·pioneer"|player=="Frieren", "Gass"))%>%
+  mutate(player = replace(player, player == "ï½‰ï¼œï¼“ï½•", "Loyn"))%>%
+  mutate(player = replace(player, player == "ï½‹ï½‰ï½—ï½‰ï¼", "Seagu"))%>%
+  mutate(player = replace(player, player == "Blacklisted1", "Ashi"))%>%
+  mutate(player = replace(player, player == "AmpheÅ¦amine", "Jewxl"))%>%
+  mutate(player = replace(player, player == "OWCohen", "S44R"))%>%
+  mutate(player = replace(player, player == "LynraxFan01"|player=="FakeNevix"|player=="AbblesFan01"|player == "Aisaka", "Nevix"))%>%
+  mutate(player = replace(player, player == "KEITH", "LYNX"))%>%
+  mutate(player = replace(player, player == "Robloxlover1", "eis"))%>%
+  mutate(player = replace(player, player == "Slurrp"|player=="HowtoWASD", "Kat"))%>%
+  mutate(player = replace(player, player == "KIP", "kip"))%>%
+  mutate(player = replace(player, player == "malign", "Sonder"))%>%
+  mutate(player = replace(player, player == "W1ll2", "W1ll"))%>%
+  mutate(player = replace(player, player == "Noah", "alba"))%>%
+  mutate(player = replace(player, player == "emily", "HarryL"))%>%
+  mutate(player = replace(player, player == "habit"|player=="Civil", "Weaq"))%>%
+  mutate(player = replace(player, player == "SD23", "IceSteel"))%>%
+  mutate(player = replace(player, player == "saulgoodman", "Gillix"))%>%
+  group_by(player, hero)%>%
+  summarise(across(everything(), sum))%>%
+  filter(time>5000)%>% #total time played must be at least this value <- to be plotted
+  ungroup()%>%
+group_by(player, hero)%>%
+  summarise(across(dmg:scorediff, ~ ./(time/600)))
+```
+
+
+The following chunk plots the first three PCs for players who meet the minimum time played threshold.
+
+kNN clustering is also used to show players of similar playstyle.
+
+
+```{r}
+tracerplayers <- herodf %>%
+  filter(hero == "Tracer")%>%
+ select(where(~ any(. != 0)))%>%
+  select(-envkills, -healing, -blk)
+  
+
+ncol <- ncol(tracerplayers)
+
+tracerplayers.pr <- prcomp(tracerplayers[,3:((ncol))],
+             center = TRUE,
+             scale. = TRUE)
+
+screeplot(tracerplayers.pr, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
+abline(h = 1, col="red", lty=5)
+legend("topright", legend=c("Eigenvalue = 1"),
+       col=c("red"), lty=5, cex=0.6)
+cumpro <- cumsum(tracerplayers.pr$sdev^2 / sum(tracerplayers.pr$sdev^2))
+plot(cumpro[0:15], xlab = "PC #", ylab = "Amount of explained variance", main = "Cumulative variance plot")
+abline(v = 3, col="blue", lty=5)
+abline(h = 0.7308, col="blue", lty=5)
+legend("topleft", legend=c("Cut-off @ PC6"),
+       col=c("blue"), lty=5, cex=0.6)
+
+plotdata <- as.data.frame(tracerplayers.pr$x[,])
+
+
+axx <- list(title="1")
+axy <- list(title="2")
+axz <- list(title="3")
+
+
+
+
+tracercl <- as.data.frame(plotdata[1:3])
+km <-kmeans(tracercl, centers = 3, nstart=25)
+tracercl$cluster = factor(km$cluster)
+
+p <- plot_ly(plotdata, x=~PC1, y=~PC2,z=~PC3, text=tracerplayers$player,color = tracercl$cluster) %>%
+     add_markers() %>%
+  layout(title = 'tracer Playstyles', plot_bgcolor = "#e5ecf6", scene = list(xaxis=axx,yaxis=axy,zaxis=axz))
+print(p)
+
+
+htmlwidgets::saveWidget(as_widget(p), "tracer.html")
+```
