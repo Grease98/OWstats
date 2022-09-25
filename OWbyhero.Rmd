@@ -1,0 +1,1151 @@
+Import libraries
+
+```{r}
+
+library(tidyverse)
+library(cluster)
+library(factoextra)
+library(plotly)
+
+```
+
+Import data from folder to main dataframe gigadf
+
+```{r}
+filenames <- list.files(path="C:/Users/thoma/OneDrive/Documents/Overwatch/thegigaset",pattern="*.txt")
+
+print(filenames)
+
+fullpath=file.path("C:/Users/thoma/OneDrive/Documents/Overwatch/thegigaset",filenames)
+
+colnames<-c("Time","Player","Hero","Hero Damage Dealt","Barrier Damage Dealt","Damage Blocked","Damage Taken","Deaths",	"Elims","Kills","Environmental Deaths","Environmental Kills","Healing","Obj Kills","Solo Kills","Ults Earned","Ults Used","Healing Received","Ult charge","Player Closest to reticle","posx","posy","posz","Team","CD1","CD2","Max hp")
+
+gigadf <- do.call("rbind",lapply(fullpath,FUN=function(files){ read.csv(files, header=0, col.names = colnames, encoding = "ANSI")}))
+gigadf <- separate(gigadf, Time, c("Time", "t2"), "\\s(?:.+\\s)?")
+```
+
+Remove event rows
+
+```{r}
+'%!in%' <- function(x,y)!('%in%'(x,y))
+gigadf <- gigadf[gigadf$Player%!in%c('FinalBlow', 'Suicide', 'Resurrected', 'DuplicatingStart', 'DuplicatingEnd'),]
+```
+
+```{r}
+gigadf <- cbind(rownumber = rownames(gigadf), gigadf) #add rownumber column
+
+df3 <- gigadf[grepl("^[[:digit:]]+|True|False",gigadf$Player),] #where player column is a number
+df3 <- df3 %>%
+  select(rownumber, Player, Hero) %>%
+  rename(Team1score = Player) %>%
+  rename(Team2score = Hero)
+
+```
+
+```{r}
+gdftest <- gigadf
+
+gdftest$t2 = as.numeric(gdftest$t2)
+gdftest$rownumber = as.numeric(gdftest$rownumber)
+
+gdftest <- gdftest %>%
+  na.omit()%>%
+  mutate(across(Hero.Damage.Dealt:Ult.charge, as.numeric))
+```
+
+Fill team score columns with scores
+
+```{r}
+start_time <- Sys.time()
+for (rows in 1:nrow(df3)){
+  r1 <- rows*12-12
+  r2 <- rows*12
+  if(is.na(r2)){
+    r2 <- nrow(gdftest)
+  }
+  team1score <- df3[rows, 2]
+  team2score <- df3[rows, 3]
+  gdftest[r1:r2,30] <- team1score
+  gdftest[r1:r2,31] <- team2score
+  print(r1)
+}
+end_time <- Sys.time() 
+
+timer <- end_time - start_time
+timer
+
+for (rows in 1:nrow(gdftest)){
+  t1s <- gdftest[rows,30]
+  t2s <- gdftest[rows,31]
+  print(rows/nrow(gdftest))
+  if(t1s=="True"){
+    t1s <- 100
+  }
+  if(t1s=="False"){
+    t1s <- 0
+  }
+  if(t2s=="True"){
+    t2s <- 100
+  }
+  if(t2s=="False"){
+    t2s <- 0
+  }
+  t1s <- as.numeric(t1s)
+  t2s <- as.numeric(t2s)
+  
+  if(gdftest[rows, 26]=="Team 1"|gdftest[rows, 26]=="Team Reality"){
+    scorediff <- t1s-t2s
+  }
+  if(gdftest[rows, 26]=="Team 2"|gdftest[rows, 26]=="frog :D"){
+    scorediff <- t2s-t1s
+  }
+  gdftest[rows, 32]<-scorediff
+}
+```
+
+```{r}
+namelist <- unique(gdftest$Player)
+
+heroswapsdf <- data.frame(matrix(ncol=32, nrow=0))
+colnames(heroswapsdf) <- colnames32
+
+for(names in 1:length(namelist)){
+megdf <- gdftest %>%
+  na.omit() %>%
+  filter(Player == namelist[names])%>%
+  na.omit()
+print(namelist[names])
+
+newmaptime <- data.frame(matrix(ncol=32, nrow=0))
+colnames(newmaptime) <- colnames32
+
+newmaptime <- rbind(newmaptime, megdf[1,])
+for (rows in 1:(nrow(megdf)-1)){
+  t1 <- megdf[rows,3]
+  t2 <- megdf[rows+1,3]
+  d1 <- megdf[rows,6]
+  d2 <- megdf[rows+1, 6]
+  if (t2<t1|d2<d1){
+    
+    newmaptime <- rbind(newmaptime, megdf[rows,])
+    newmaptime <- rbind(newmaptime, megdf[rows+1,])
+  }
+}
+newmaptime <- rbind(newmaptime, megdf[nrow(megdf),]) 
+
+print(nrow(newmaptime))
+for (map in 1:(nrow(newmaptime)/2)){
+  map0 <- as.numeric(newmaptime[map*2-1, 1]) #map start row
+  map1 <- as.numeric(newmaptime[map*2, 1]) #map end row
+
+memap1 <- data.frame(matrix(ncol=32, nrow=0))
+colnames(memap1) <- colnames32
+
+meddf <- gdftest %>%
+  filter(Player == namelist[names])
+
+ind2b1 <- which(meddf$rownumber==map0)
+ind2b2 <- which(meddf$rownumber==map1)
+
+
+
+memap1 <- memap1 %>%
+  rbind(meddf[ind2b1:ind2b2,])
+  for (rows in 1:(nrow(memap1)-1)){
+    hero0 <- memap1[rows,5]
+    hero1 <- memap1[rows+1, 5]
+    if(rows == 1){
+      heroswapsdf <- rbind(heroswapsdf,memap1[1,])
+    }
+    if (hero0 != hero1){
+      heroswapsdf <- rbind(heroswapsdf, memap1[rows,])
+      heroswapsdf <- rbind(heroswapsdf, memap1[rows+1,])
+    }
+    if(rows == (nrow(memap1)-1)){
+      heroswapsdf <- rbind(heroswapsdf, memap1[(rows)+1,])
+    }
+  }
+}
+
+}
+```
+
+```{r}
+
+diffdf <- data.frame(matrix(ncol=17, nrow=0))
+colnamesdiff <- c("player", "hero", "time","dmg","bdmg","blk","dmgtaken","deaths","elims","kills","envkills","healing","objkills", "solokills","ultsearned","ultsused", "scoredf")
+
+colnames(diffdf) <- colnamesdiff
+
+heroswapsdf <- heroswapsdf %>%
+  na.omit()
+
+for(pairs in 1:(nrow(heroswapsdf)/2)){
+  player <- heroswapsdf[pairs*2-1,4]
+  hero <- heroswapsdf[pairs*2-1,5]
+  scorediff <- heroswapsdf[pairs*2-1,32]
+  time <- heroswapsdf[pairs*2,3] - heroswapsdf[pairs*2-1,3]
+  dmg <- heroswapsdf[pairs*2,6] - heroswapsdf[pairs*2-1,6]
+  bdmg <- heroswapsdf[pairs*2,7] - heroswapsdf[pairs*2-1,7]
+  blk <- heroswapsdf[pairs*2,8] - heroswapsdf[pairs*2-1,8]
+  dmgtaken <- heroswapsdf[pairs*2,9] - heroswapsdf[pairs*2-1,9]
+  deaths <- heroswapsdf[pairs*2,10] - heroswapsdf[pairs*2-1,10]
+  elims <- heroswapsdf[pairs*2,11] - heroswapsdf[pairs*2-1,11]
+  kills <- heroswapsdf[pairs*2,12] - heroswapsdf[pairs*2-1,12]
+  envkills <- heroswapsdf[pairs*2,14] - heroswapsdf[pairs*2-1,14]
+  healing <- heroswapsdf[pairs*2,15] - heroswapsdf[pairs*2-1,15]
+  objkills <- heroswapsdf[pairs*2,16] - heroswapsdf[pairs*2-1,16]
+  solokills <- heroswapsdf[pairs*2,17] - heroswapsdf[pairs*2-1,17]
+  ultsearned <- heroswapsdf[pairs*2,18] - heroswapsdf[pairs*2-1,18]
+  ultsused <- heroswapsdf[pairs*2,19] - heroswapsdf[pairs*2-1,19]
+  
+  
+  df <- data.frame(player, hero, time, dmg, bdmg, blk, dmgtaken, deaths, elims, kills, envkills, healing, objkills, solokills, ultsearned, ultsused, scorediff)
+  
+  diffdf <- rbind(diffdf, df)
+  
+}
+
+t1 <- sum(diffdf$time)
+
+diffdf <- diffdf %>%
+  mutate(sdpersec = scorediff/time)%>%
+  filter(sdpersec <= 1) %>%
+  filter(sdpersec >=-1) %>%
+  filter(time >=30)
+
+t2 <- sum(diffdf$time)
+
+print((t2/t1)*100)
+
+herodf <- diffdf %>%
+
+  
+  mutate(player = replace(player, player == "Myi"|player=="Myu", "Myo"))%>%
+  mutate(player = replace(player, player == "Helmer", "Helmerdrake"))%>%
+  mutate(player = replace(player, player == "D0nghun", "donghun"))%>%
+  mutate(player = replace(player, player == "KIP", "kip"))%>%
+  mutate(player = replace(player, player == "Robloxlover1", "eis"))%>%
+  mutate(player = replace(player, player == "WhoAsked", "CaptainPrash"))%>%
+  mutate(player = replace(player, player == "Ä”Æ‘Æ‘0Å˜Å¦"|player=="Ä”Æ‘Æ‘0È’Å¦", "Effort"))%>%
+  mutate(player = replace(player, player == "AVA"|player=="Eclipse"|player=="vera", "Senna"))%>%
+  mutate(player = replace(player, player == "PÃŠÄœÄœÅ¶Çƒ", "Sonder")) %>%
+  mutate(player = replace(player, player=="Jiro"|player=="XANTARES"|player=="forsaken"|player=="Avo", "Avoria"))%>%
+  mutate(player = replace(player, player=="ADBLOCKER", "sam"))%>%
+  mutate(player = replace(player, player=="Ç€Æ–Ç€Æ–Ç€Æ–Ç€Æ–Ç€Æ–Ç€"|player=="Ç€Ç€Ç€Ç€Ç€Ç€Ç€Ç€Ç€Ç€", "barcode"))%>%
+  mutate(player = replace(player, player=="FakeJake", "Demonoir"))%>%
+  mutate(player = replace(player, player=="FROGASS"|player=="Beatrice"|player=="Gass"|player=="Learn2Play"|player=="RECONÇ¶MODE"|player=="Unarovite"|player=="Ç·pioneer"|player=="Frieren", "Gass"))%>%
+  mutate(player = replace(player, player == "ï½‰ï¼œï¼“ï½•", "Loyn"))%>%
+  mutate(player = replace(player, player == "ï½‹ï½‰ï½—ï½‰ï¼", "Seagu"))%>%
+  mutate(player = replace(player, player == "Blacklisted1", "Ashi"))%>%
+  mutate(player = replace(player, player == "AmpheÅ¦amine", "Jewxl"))%>%
+  mutate(player = replace(player, player == "OWCohen", "S44R"))%>%
+  mutate(player = replace(player, player == "LynraxFan01"|player=="FakeNevix"|player=="AbblesFan01"|player == "Aisaka", "Nevix"))%>%
+  mutate(player = replace(player, player == "KEITH", "LYNX"))%>%
+  mutate(player = replace(player, player == "Robloxlover1", "eis"))%>%
+  mutate(player = replace(player, player == "Slurrp"|player=="HowtoWASD", "Kat"))%>%
+  mutate(player = replace(player, player == "KIP", "kip"))%>%
+  mutate(player = replace(player, player == "malign", "Sonder"))%>%
+  mutate(player = replace(player, player == "W1ll2", "W1ll"))%>%
+  mutate(player = replace(player, player == "Noah", "alba"))%>%
+  mutate(player = replace(player, player == "emily", "HarryL"))%>%
+  mutate(player = replace(player, player == "habit"|player=="Civil", "Weaq"))%>%
+  mutate(player = replace(player, player == "SD23", "IceSteel"))%>%
+  mutate(player = replace(player, player == "saulgoodman", "Gillix"))%>%
+  group_by(player, hero)%>%
+  summarise(across(everything(), sum))%>%
+  filter(time>5000)%>%
+  ungroup()%>%
+group_by(player, hero)%>%
+  summarise(across(dmg:scorediff, ~ ./(time/600)))
+  
+# group_by(player, hero)%>%
+#   summarise(across(dmg:scorediff, ~ ./(time/600)))
+
+# 
+# group_by(player, hero)%>%
+#   summarise(across(time:scorediff))
+```
+
+```{r}
+
+jaketracer <- herodf %>%
+  filter(player=="Gilix")
+```
+
+```{r}
+lucioplayers <- herodf %>%
+  filter(hero == "LÃºcio")%>%
+ select(where(~ any(. != 0)))
+
+ncol <- ncol(lucioplayers)
+
+lucioplayers.pr <- prcomp(lucioplayers[,3:((ncol))],
+             center = TRUE,
+             scale. = TRUE)
+
+screeplot(lucioplayers.pr, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
+abline(h = 1, col="red", lty=5)
+legend("topright", legend=c("Eigenvalue = 1"),
+       col=c("red"), lty=5, cex=0.6)
+cumpro <- cumsum(lucioplayers.pr$sdev^2 / sum(lucioplayers.pr$sdev^2))
+plot(cumpro[0:15], xlab = "PC #", ylab = "Amount of explained variance", main = "Cumulative variance plot")
+abline(v = 3, col="blue", lty=5)
+abline(h = 0.7308, col="blue", lty=5)
+legend("topleft", legend=c("Cut-off @ PC6"),
+       col=c("blue"), lty=5, cex=0.6)
+
+plotdata <- as.data.frame(lucioplayers.pr$x[,])
+
+
+axx <- list(title="Individual value")
+axy <- list(title="Aggression")
+axz <- list(title="Inting")
+
+luciocl <- as.data.frame(plotdata[1:3])
+km <-kmeans(luciocl, centers = 3, nstart=25)
+luciocl$cluster = factor(km$cluster)
+
+p <- plot_ly(plotdata, x=~PC1, y=~PC2, z=~PC3, text=lucioplayers$player,color = luciocl$cluster) %>%
+     add_markers() %>%
+  layout(scene = list(xaxis=axx,yaxis=axy,zaxis=axz), title = 'Lucio Playstyles', plot_bgcolor = "#e5ecf6")
+print(p)
+
+
+htmlwidgets::saveWidget(as_widget(p), "lucio.html")
+
+```
+
+```{r}
+baptisteplayers <- herodf %>%
+  filter(hero == "Baptiste")%>%
+ select(where(~ any(. != 0)))
+
+ncol <- ncol(baptisteplayers)
+
+baptisteplayers.pr <- prcomp(baptisteplayers[,3:((ncol))],
+             center = TRUE,
+             scale. = TRUE)
+
+screeplot(baptisteplayers.pr, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
+abline(h = 1, col="red", lty=5)
+legend("topright", legend=c("Eigenvalue = 1"),
+       col=c("red"), lty=5, cex=0.6)
+cumpro <- cumsum(baptisteplayers.pr$sdev^2 / sum(baptisteplayers.pr$sdev^2))
+plot(cumpro[0:15], xlab = "PC #", ylab = "Amount of explained variance", main = "Cumulative variance plot")
+abline(v = 3, col="blue", lty=5)
+abline(h = 0.7308, col="blue", lty=5)
+legend("topleft", legend=c("Cut-off @ PC6"),
+       col=c("blue"), lty=5, cex=0.6)
+
+plotdata <- as.data.frame(baptisteplayers.pr$x[,])
+
+
+axx <- list(title="game")
+axy <- list(title="kill")
+axz <- list(title="afk in da back")
+
+baptistecl <- as.data.frame(plotdata[1:3])
+km <-kmeans(baptistecl, centers = 3, nstart=25)
+baptistecl$cluster = factor(km$cluster)
+
+p <- plot_ly(plotdata, x=~PC1, y=~PC2, z=~PC3, text=baptisteplayers$player,color = baptistecl$cluster) %>%
+     add_markers() %>%
+  layout(scene = list(xaxis=axx,yaxis=axy,zaxis=axz), title = 'baptiste Playstyles', plot_bgcolor = "#e5ecf6")
+print(p)
+
+
+htmlwidgets::saveWidget(as_widget(p), "baptiste.html")
+
+```
+
+```{r}
+brigplayers <- herodf %>%
+  filter(hero == "Brigitte")%>%
+ select(where(~ any(. != 0)))%>%
+  select(-envkills)
+
+ncol <- ncol(brigplayers)
+
+brigplayers.pr <- prcomp(brigplayers[,3:((ncol))],
+             center = TRUE,
+             scale. = TRUE)
+
+screeplot(brigplayers.pr, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
+abline(h = 1, col="red", lty=5)
+legend("topright", legend=c("Eigenvalue = 1"),
+       col=c("red"), lty=5, cex=0.6)
+cumpro <- cumsum(brigplayers.pr$sdev^2 / sum(brigplayers.pr$sdev^2))
+plot(cumpro[0:15], xlab = "PC #", ylab = "Amount of explained variance", main = "Cumulative variance plot")
+abline(v = 3, col="blue", lty=5)
+abline(h = 0.7308, col="blue", lty=5)
+legend("topleft", legend=c("Cut-off @ PC6"),
+       col=c("blue"), lty=5, cex=0.6)
+
+plotdata <- as.data.frame(brigplayers.pr$x[,])
+
+
+axx <- list(title="1")
+axy <- list(title="2")
+axz <- list(title="3")
+
+brigcl <- as.data.frame(plotdata[1:3])
+km <-kmeans(brigcl, centers = 3, nstart=25)
+brigcl$cluster = factor(km$cluster)
+
+p <- plot_ly(plotdata, x=~PC1, y=~PC2, z=~PC3, text=brigplayers$player,color = brigcl$cluster) %>%
+     add_markers() %>%
+  layout(scene = list(xaxis=axx,yaxis=axy,zaxis=axz), title = 'brig Playstyles', plot_bgcolor = "#e5ecf6")
+print(p)
+
+
+htmlwidgets::saveWidget(as_widget(p), "brig.html")
+```
+
+```{r}
+tracerplayers <- herodf %>%
+  filter(hero == "Tracer")%>%
+ select(where(~ any(. != 0)))%>%
+  select(-envkills, -healing, -blk)
+  
+
+ncol <- ncol(tracerplayers)
+
+tracerplayers.pr <- prcomp(tracerplayers[,3:((ncol))],
+             center = TRUE,
+             scale. = TRUE)
+
+screeplot(tracerplayers.pr, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
+abline(h = 1, col="red", lty=5)
+legend("topright", legend=c("Eigenvalue = 1"),
+       col=c("red"), lty=5, cex=0.6)
+cumpro <- cumsum(tracerplayers.pr$sdev^2 / sum(tracerplayers.pr$sdev^2))
+plot(cumpro[0:15], xlab = "PC #", ylab = "Amount of explained variance", main = "Cumulative variance plot")
+abline(v = 3, col="blue", lty=5)
+abline(h = 0.7308, col="blue", lty=5)
+legend("topleft", legend=c("Cut-off @ PC6"),
+       col=c("blue"), lty=5, cex=0.6)
+
+plotdata <- as.data.frame(tracerplayers.pr$x[,])
+
+
+axx <- list(title="1")
+axy <- list(title="2")
+axz <- list(title="3")
+
+
+
+
+tracercl <- as.data.frame(plotdata[1:3])
+km <-kmeans(tracercl, centers = 3, nstart=25)
+tracercl$cluster = factor(km$cluster)
+
+p <- plot_ly(plotdata, x=~PC1, y=~PC2,z=~PC3, text=tracerplayers$player,color = tracercl$cluster) %>%
+     add_markers() %>%
+  layout(title = 'tracer Playstyles', plot_bgcolor = "#e5ecf6", scene = list(xaxis=axx,yaxis=axy,zaxis=axz))
+print(p)
+
+
+htmlwidgets::saveWidget(as_widget(p), "tracer.html")
+```
+
+```{r}
+hanzoplayers <- herodf %>%
+  filter(hero == "Hanzo")%>%
+ select(where(~ any(. != 0)))%>%
+  select(-envkills, -healing)
+
+ncol <- ncol(hanzoplayers)
+
+hanzoplayers.pr <- prcomp(hanzoplayers[,3:((ncol))],
+             center = TRUE,
+             scale. = TRUE)
+
+screeplot(hanzoplayers.pr, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
+abline(h = 1, col="red", lty=5)
+legend("topright", legend=c("Eigenvalue = 1"),
+       col=c("red"), lty=5, cex=0.6)
+cumpro <- cumsum(hanzoplayers.pr$sdev^2 / sum(hanzoplayers.pr$sdev^2))
+plot(cumpro[0:15], xlab = "PC #", ylab = "Amount of explained variance", main = "Cumulative variance plot")
+abline(v = 3, col="blue", lty=5)
+abline(h = 0.7308, col="blue", lty=5)
+legend("topleft", legend=c("Cut-off @ PC6"),
+       col=c("blue"), lty=5, cex=0.6)
+
+plotdata <- as.data.frame(hanzoplayers.pr$x[,])
+
+
+axx <- list(title="1")
+axy <- list(title="2")
+axz <- list(title="3")
+
+hanzocl <- as.data.frame(plotdata[1:3])
+km <-kmeans(hanzocl, centers = 3, nstart=25)
+hanzocl$cluster = factor(km$cluster)
+
+p <- plot_ly(plotdata, x=~PC1, y=~PC2, z=~PC3, text=hanzoplayers$player,color = hanzocl$cluster) %>%
+     add_markers() %>%
+  layout(scene = list(xaxis=axx,yaxis=axy,zaxis=axz), title = 'hanzo Playstyles', plot_bgcolor = "#e5ecf6")
+print(p)
+
+
+htmlwidgets::saveWidget(as_widget(p), "hanzo.html")
+
+```
+
+```{r}
+meiplayers <- herodf %>%
+  filter(hero == "Mei")%>%
+ select(where(~ any(. != 0)))%>%
+  select(-envkills, -healing)
+
+ncol <- ncol(meiplayers)
+
+meiplayers.pr <- prcomp(meiplayers[,3:((ncol))],
+             center = TRUE,
+             scale. = TRUE)
+
+screeplot(meiplayers.pr, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
+abline(h = 1, col="red", lty=5)
+legend("topright", legend=c("Eigenvalue = 1"),
+       col=c("red"), lty=5, cex=0.6)
+cumpro <- cumsum(meiplayers.pr$sdev^2 / sum(meiplayers.pr$sdev^2))
+plot(cumpro[0:15], xlab = "PC #", ylab = "Amount of explained variance", main = "Cumulative variance plot")
+abline(v = 3, col="blue", lty=5)
+abline(h = 0.7308, col="blue", lty=5)
+legend("topleft", legend=c("Cut-off @ PC6"),
+       col=c("blue"), lty=5, cex=0.6)
+
+plotdata <- as.data.frame(meiplayers.pr$x[,])
+
+
+axx <- list(title="being good")
+axy <- list(title="2")
+axz <- list(title="3")
+
+meicl <- as.data.frame(plotdata[1:3])
+km <-kmeans(meicl, centers = 3, nstart=25)
+meicl$cluster = factor(km$cluster)
+
+p <- plot_ly(plotdata, x=~PC1, y=~PC2, z=~PC3, text=meiplayers$player,color = meicl$cluster) %>%
+     add_markers() %>%
+  layout(scene = list(xaxis=axx,yaxis=axy,zaxis=axz), title = 'mei Playstyles', plot_bgcolor = "#e5ecf6")
+print(p)
+
+
+htmlwidgets::saveWidget(as_widget(p), "mei.html")
+```
+
+```{r}
+echoplayers <- herodf %>%
+  filter(hero == "Echo")%>%
+ select(where(~ any(. != 0)))%>%
+  select(-envkills, -healing)
+
+ncol <- ncol(echoplayers)
+
+echoplayers.pr <- prcomp(echoplayers[,3:((ncol))],
+             center = TRUE,
+             scale. = TRUE)
+
+screeplot(echoplayers.pr, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
+abline(h = 1, col="red", lty=5)
+legend("topright", legend=c("Eigenvalue = 1"),
+       col=c("red"), lty=5, cex=0.6)
+cumpro <- cumsum(echoplayers.pr$sdev^2 / sum(echoplayers.pr$sdev^2))
+plot(cumpro[0:15], xlab = "PC #", ylab = "Amount of explained variance", main = "Cumulative variance plot")
+abline(v = 3, col="blue", lty=5)
+abline(h = 0.7308, col="blue", lty=5)
+legend("topleft", legend=c("Cut-off @ PC6"),
+       col=c("blue"), lty=5, cex=0.6)
+
+plotdata <- as.data.frame(echoplayers.pr$x[,])
+
+
+axx <- list(title="Aggro no burst")
+axy <- list(title="Coordination/Timing")
+axz <- list(title="Aggro")
+
+echocl <- as.data.frame(plotdata[1:3])
+km <-kmeans(echocl, centers = 3, nstart=25)
+echocl$cluster = factor(km$cluster)
+
+p <- plot_ly(plotdata, x=~PC1, y=~PC2, z=~PC3, text=echoplayers$player,color = echocl$cluster) %>%
+     add_markers() %>%
+  layout(scene = list(xaxis=axx,yaxis=axy,zaxis=axz), title = 'echo Playstyles', plot_bgcolor = "#e5ecf6")
+print(p)
+
+
+htmlwidgets::saveWidget(as_widget(p), "echo.html")
+
+```
+
+```{r}
+sombraplayers <- herodf %>%
+  filter(hero == "Sombra")%>%
+ select(where(~ any(. != 0)))
+
+ncol <- ncol(sombraplayers)
+
+sombraplayers.pr <- prcomp(sombraplayers[,3:((ncol))],
+             center = TRUE,
+             scale. = TRUE)
+
+screeplot(sombraplayers.pr, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
+abline(h = 1, col="red", lty=5)
+legend("topright", legend=c("Eigenvalue = 1"),
+       col=c("red"), lty=5, cex=0.6)
+cumpro <- cumsum(sombraplayers.pr$sdev^2 / sum(sombraplayers.pr$sdev^2))
+plot(cumpro[0:15], xlab = "PC #", ylab = "Amount of explained variance", main = "Cumulative variance plot")
+abline(v = 3, col="blue", lty=5)
+abline(h = 0.7308, col="blue", lty=5)
+legend("topleft", legend=c("Cut-off @ PC6"),
+       col=c("blue"), lty=5, cex=0.6)
+
+plotdata <- as.data.frame(sombraplayers.pr$x[,])
+
+
+axx <- list(title="Shooting the gun")
+axy <- list(title="Coordination/Timing")
+axz <- list(title="Assassin")
+
+sombracl <- as.data.frame(plotdata[1:3])
+km <-kmeans(sombracl, centers = 3, nstart=25)
+sombracl$cluster = factor(km$cluster)
+
+p <- plot_ly(plotdata, x=~PC1, y=~PC2, z=~PC3, text=sombraplayers$player,color = sombracl$cluster) %>%
+     add_markers() %>%
+  layout(scene = list(xaxis=axx,yaxis=axy,zaxis=axz), title = 'sombra Playstyles', plot_bgcolor = "#e5ecf6")
+print(p)
+
+
+htmlwidgets::saveWidget(as_widget(p), "sombra.html")
+
+```
+
+```{r}
+ballplayers <- herodf %>%
+  filter(hero == "Wrecking Ball")%>%
+ select(where(~ any(. != 0))) %>%
+  select(-healing)
+  
+
+ncol <- ncol(ballplayers)
+
+ballplayers.pr <- prcomp(ballplayers[,3:((ncol))],
+             center = TRUE,
+             scale. = TRUE)
+
+screeplot(ballplayers.pr, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
+abline(h = 1, col="red", lty=5)
+legend("topright", legend=c("Eigenvalue = 1"),
+       col=c("red"), lty=5, cex=0.6)
+cumpro <- cumsum(ballplayers.pr$sdev^2 / sum(ballplayers.pr$sdev^2))
+plot(cumpro[0:15], xlab = "PC #", ylab = "Amount of explained variance", main = "Cumulative variance plot")
+abline(v = 3, col="blue", lty=5)
+abline(h = 0.7308, col="blue", lty=5)
+legend("topleft", legend=c("Cut-off @ PC6"),
+       col=c("blue"), lty=5, cex=0.6)
+
+plotdata <- as.data.frame(ballplayers.pr$x[,])
+
+
+axx <- list(title="Individual Value")
+axy <- list(title="Aggression/Uptime")
+axz <- list(title="3")
+
+ballcl <- as.data.frame(plotdata[1:3])
+km <-kmeans(ballcl, centers = 3, nstart=25)
+ballcl$cluster = factor(km$cluster)
+
+p <- plot_ly(plotdata, x=~PC1, y=~PC2, text=ballplayers$player,color = ballcl$cluster) %>%
+     add_markers() %>%
+  layout(scene = list(xaxis=axx,yaxis=axy,zaxis=axz), title = 'ball Playstyles', plot_bgcolor = "#e5ecf6")
+print(p)
+
+
+htmlwidgets::saveWidget(as_widget(p), "ball.html")
+
+```
+
+```{r}
+reinplayers <- herodf %>%
+  filter(hero == "Reinhardt")%>%
+ select(where(~ any(. != 0)))%>%
+  select(-envkills, -healing)
+
+ncol <- ncol(reinplayers)
+
+reinplayers.pr <- prcomp(reinplayers[,3:((ncol))],
+             center = TRUE,
+             scale. = TRUE)
+
+screeplot(reinplayers.pr, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
+abline(h = 1, col="red", lty=5)
+legend("topright", legend=c("Eigenvalue = 1"),
+       col=c("red"), lty=5, cex=0.6)
+cumpro <- cumsum(reinplayers.pr$sdev^2 / sum(reinplayers.pr$sdev^2))
+plot(cumpro[0:15], xlab = "PC #", ylab = "Amount of explained variance", main = "Cumulative variance plot")
+abline(v = 3, col="blue", lty=5)
+abline(h = 0.7308, col="blue", lty=5)
+legend("topleft", legend=c("Cut-off @ PC6"),
+       col=c("blue"), lty=5, cex=0.6)
+
+plotdata <- as.data.frame(reinplayers.pr$x[,])
+
+
+axx <- list(title="Individual value (high is bad)")
+axy <- list(title="Aggro")
+axz <- list(title="Bitchness")
+
+reincl <- as.data.frame(plotdata[1:3])
+km <-kmeans(reincl, centers = 3, nstart=25)
+reincl$cluster = factor(km$cluster)
+
+p <- plot_ly(plotdata, x=~PC1, y=~PC2, z=~PC3, text=reinplayers$player,color = reincl$cluster) %>%
+     add_markers() %>%
+  layout(scene = list(xaxis=axx,yaxis=axy,zaxis=axz), title = 'rein Playstyles', plot_bgcolor = "#e5ecf6")
+print(p)
+
+
+htmlwidgets::saveWidget(as_widget(p), "rein.html")
+
+```
+
+```{r}
+winstonplayers <- herodf %>%
+  filter(hero == "Winston")%>%
+ select(where(~ any(. != 0)))
+
+ncol <- ncol(winstonplayers)
+
+winstonplayers.pr <- prcomp(winstonplayers[,3:((ncol))],
+             center = TRUE,
+             scale. = TRUE)
+
+screeplot(winstonplayers.pr, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
+abline(h = 1, col="red", lty=5)
+legend("topright", legend=c("Eigenvalue = 1"),
+       col=c("red"), lty=5, cex=0.6)
+cumpro <- cumsum(winstonplayers.pr$sdev^2 / sum(winstonplayers.pr$sdev^2))
+plot(cumpro[0:15], xlab = "PC #", ylab = "Amount of explained variance", main = "Cumulative variance plot")
+abline(v = 3, col="blue", lty=5)
+abline(h = 0.7308, col="blue", lty=5)
+legend("topleft", legend=c("Cut-off @ PC6"),
+       col=c("blue"), lty=5, cex=0.6)
+
+plotdata <- as.data.frame(winstonplayers.pr$x[,])
+
+
+axx <- list(title="Individual Value")
+axy <- list(title="Damage efficiency")
+axz <- list(title="Farming for nano")
+
+winstoncl <- as.data.frame(plotdata[1:3])
+km <-kmeans(winstoncl, centers = 3, nstart=25)
+winstoncl$cluster = factor(km$cluster)
+
+p <- plot_ly(plotdata, x=~PC1, y=~PC2, z=~PC3, text=winstonplayers$player,color = winstoncl$cluster) %>%
+     add_markers() %>%
+  layout(scene = list(xaxis=axx,yaxis=axy,zaxis=axz), title = 'winston Playstyles', plot_bgcolor = "#e5ecf6")
+print(p)
+
+
+htmlwidgets::saveWidget(as_widget(p), "winston.html")
+```
+
+```{r}
+orisaplayers <- herodf %>%
+  filter(hero == "Orisa")%>%
+ select(where(~ any(. != 0)))
+
+ncol <- ncol(orisaplayers)
+
+orisaplayers.pr <- prcomp(orisaplayers[,3:((ncol))],
+             center = TRUE,
+             scale. = TRUE)
+
+screeplot(orisaplayers.pr, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
+abline(h = 1, col="red", lty=5)
+legend("topright", legend=c("Eigenvalue = 1"),
+       col=c("red"), lty=5, cex=0.6)
+cumpro <- cumsum(orisaplayers.pr$sdev^2 / sum(orisaplayers.pr$sdev^2))
+plot(cumpro[0:15], xlab = "PC #", ylab = "Amount of explained variance", main = "Cumulative variance plot")
+abline(v = 3, col="blue", lty=5)
+abline(h = 0.7308, col="blue", lty=5)
+legend("topleft", legend=c("Cut-off @ PC6"),
+       col=c("blue"), lty=5, cex=0.6)
+
+plotdata <- as.data.frame(orisaplayers.pr$x[,])
+
+
+axx <- list(title="1")
+axy <- list(title="2")
+axz <- list(title="3")
+
+orisacl <- as.data.frame(plotdata[1:3])
+km <-kmeans(orisacl, centers = 3, nstart=25)
+orisacl$cluster = factor(km$cluster)
+
+p <- plot_ly(plotdata, x=~PC1, y=~PC2, z=~PC3, text=orisaplayers$player,color = orisacl$cluster) %>%
+     add_markers() %>%
+  layout(scene = list(xaxis=axx,yaxis=axy,zaxis=axz), title = 'orisa Playstyles', plot_bgcolor = "#e5ecf6")
+print(p)
+
+
+htmlwidgets::saveWidget(as_widget(p), "orisa.html")
+```
+
+```{r}
+winstonplayers <- herodf %>%
+  filter(hero == "Winston")%>%
+ select(where(~ any(. != 0)))
+
+ncol <- ncol(winstonplayers)
+
+winstonplayers.pr <- prcomp(winstonplayers[,3:((ncol))],
+             center = TRUE,
+             scale. = TRUE)
+
+screeplot(winstonplayers.pr, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
+abline(h = 1, col="red", lty=5)
+legend("topright", legend=c("Eigenvalue = 1"),
+       col=c("red"), lty=5, cex=0.6)
+cumpro <- cumsum(winstonplayers.pr$sdev^2 / sum(winstonplayers.pr$sdev^2))
+plot(cumpro[0:15], xlab = "PC #", ylab = "Amount of explained variance", main = "Cumulative variance plot")
+abline(v = 3, col="blue", lty=5)
+abline(h = 0.7308, col="blue", lty=5)
+legend("topleft", legend=c("Cut-off @ PC6"),
+       col=c("blue"), lty=5, cex=0.6)
+
+plotdata <- as.data.frame(winstonplayers.pr$x[,])
+
+
+axx <- list(title="Gaming")
+axy <- list(title="Passive")
+axz <- list(title="3")
+
+winstoncl <- as.data.frame(plotdata[1:3])
+km <-kmeans(winstoncl, centers = 3, nstart=25)
+winstoncl$cluster = factor(km$cluster)
+
+p <- plot_ly(plotdata, x=~PC1, y=~PC2, z=~PC3, text=winstonplayers$player,color = winstoncl$cluster) %>%
+     add_markers() %>%
+  layout(scene = list(xaxis=axx,yaxis=axy,zaxis=axz), title = 'winston Playstyles', plot_bgcolor = "#e5ecf6")
+print(p)
+
+
+htmlwidgets::saveWidget(as_widget(p), "winston.html")
+
+```
+
+```{r}
+sigmaplayers <- herodf %>%
+  filter(hero == "Sigma")%>%
+ select(where(~ any(. != 0)))%>%
+  select(-envkills, -healing)
+
+ncol <- ncol(sigmaplayers)
+
+sigmaplayers.pr <- prcomp(sigmaplayers[,3:((ncol))],
+             center = TRUE,
+             scale. = TRUE)
+
+screeplot(sigmaplayers.pr, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
+abline(h = 1, col="red", lty=5)
+legend("topright", legend=c("Eigenvalue = 1"),
+       col=c("red"), lty=5, cex=0.6)
+cumpro <- cumsum(sigmaplayers.pr$sdev^2 / sum(sigmaplayers.pr$sdev^2))
+plot(cumpro[0:15], xlab = "PC #", ylab = "Amount of explained variance", main = "Cumulative variance plot")
+abline(v = 3, col="blue", lty=5)
+abline(h = 0.7308, col="blue", lty=5)
+legend("topleft", legend=c("Cut-off @ PC6"),
+       col=c("blue"), lty=5, cex=0.6)
+
+plotdata <- as.data.frame(sigmaplayers.pr$x[,])
+
+
+axx <- list(title="1")
+axy <- list(title="2")
+axz <- list(title="3")
+
+sigmacl <- as.data.frame(plotdata[1:3])
+km <-kmeans(sigmacl, centers = 3, nstart=25)
+sigmacl$cluster = factor(km$cluster)
+
+p <- plot_ly(plotdata, x=~PC1, y=~PC2, z=~PC3, text=sigmaplayers$player,color = sigmacl$cluster) %>%
+     add_markers() %>%
+  layout(scene = list(xaxis=axx,yaxis=axy,zaxis=axz), title = 'sigma Playstyles', plot_bgcolor = "#e5ecf6")
+print(p)
+
+
+htmlwidgets::saveWidget(as_widget(p), "sigma.html")
+
+```
+
+```{r}
+
+dvaplayers <- herodf %>%
+  filter(hero == "D.Va")%>%
+ select(where(~ any(. != 0)))%>%
+  select(-envkills, -healing)
+
+ncol <- ncol(dvaplayers)
+
+dvaplayers.pr <- prcomp(dvaplayers[,3:((ncol))],
+             center = TRUE,
+             scale. = TRUE)
+
+screeplot(dvaplayers.pr, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
+abline(h = 1, col="red", lty=5)
+legend("topright", legend=c("Eigenvalue = 1"),
+       col=c("red"), lty=5, cex=0.6)
+cumpro <- cumsum(dvaplayers.pr$sdev^2 / sum(dvaplayers.pr$sdev^2))
+plot(cumpro[0:15], xlab = "PC #", ylab = "Amount of explained variance", main = "Cumulative variance plot")
+abline(v = 3, col="blue", lty=5)
+abline(h = 0.7308, col="blue", lty=5)
+legend("topleft", legend=c("Cut-off @ PC6"),
+       col=c("blue"), lty=5, cex=0.6)
+
+plotdata <- as.data.frame(dvaplayers.pr$x[,])
+
+
+axx <- list(title="Individual Value")
+axy <- list(title="Aggro/inting")
+axz <- list(title="3")
+
+dvacl <- as.data.frame(plotdata[1:3])
+km <-kmeans(dvacl, centers = 3, nstart=25)
+dvacl$cluster = factor(km$cluster)
+
+p <- plot_ly(plotdata, x=~PC1, y=~PC2, text=dvaplayers$player,color = dvacl$cluster) %>%
+     add_markers() %>%
+  layout(scene = list(xaxis=axx,yaxis=axy,zaxis=axz), title = 'dva Playstyles', plot_bgcolor = "#e5ecf6")
+print(p)
+
+
+htmlwidgets::saveWidget(as_widget(p), "dva.html")
+
+```
+
+```{r}
+zaryaplayers <- herodf %>%
+  filter(hero == "Zarya")%>%
+ select(where(~ any(. != 0)))%>%
+  select(-envkills, -healing)
+
+ncol <- ncol(zaryaplayers)
+
+zaryaplayers.pr <- prcomp(zaryaplayers[,3:((ncol))],
+             center = TRUE,
+             scale. = TRUE)
+
+screeplot(zaryaplayers.pr, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
+abline(h = 1, col="red", lty=5)
+legend("topright", legend=c("Eigenvalue = 1"),
+       col=c("red"), lty=5, cex=0.6)
+cumpro <- cumsum(zaryaplayers.pr$sdev^2 / sum(zaryaplayers.pr$sdev^2))
+plot(cumpro[0:15], xlab = "PC #", ylab = "Amount of explained variance", main = "Cumulative variance plot")
+abline(v = 3, col="blue", lty=5)
+abline(h = 0.7308, col="blue", lty=5)
+legend("topleft", legend=c("Cut-off @ PC6"),
+       col=c("blue"), lty=5, cex=0.6)
+
+plotdata <- as.data.frame(zaryaplayers.pr$x[,])
+
+
+axx <- list(title="Gaming")
+axy <- list(title="AFk bubblebot")
+axz <- list(title="AFK but well (")
+
+zaryacl <- as.data.frame(plotdata[1:3])
+km <-kmeans(zaryacl, centers = 3, nstart=25)
+zaryacl$cluster = factor(km$cluster)
+
+p <- plot_ly(plotdata, x=~PC1, y=~PC2, text=zaryaplayers$player,color = zaryacl$cluster) %>%
+     add_markers() %>%
+  layout(scene = list(xaxis=axx,yaxis=axy,zaxis=axz), title = 'zarya Playstyles', plot_bgcolor = "#e5ecf6")
+print(p)
+
+
+htmlwidgets::saveWidget(as_widget(p), "zarya.html")
+
+```
+
+```{r}
+
+zenplayers <- herodf %>%
+  filter(hero == "Zenyatta")%>%
+ select(where(~ any(. != 0)))%>%
+  select(-envkills, -blk)
+
+ncol <- ncol(zenplayers)
+
+zenplayers.pr <- prcomp(zenplayers[,3:((ncol))],
+             center = TRUE,
+             scale. = TRUE)
+
+screeplot(zenplayers.pr, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
+abline(h = 1, col="red", lty=5)
+legend("topright", legend=c("Eigenvalue = 1"),
+       col=c("red"), lty=5, cex=0.6)
+cumpro <- cumsum(zenplayers.pr$sdev^2 / sum(zenplayers.pr$sdev^2))
+plot(cumpro[0:15], xlab = "PC #", ylab = "Amount of explained variance", main = "Cumulative variance plot")
+abline(v = 3, col="blue", lty=5)
+abline(h = 0.7308, col="blue", lty=5)
+legend("topleft", legend=c("Cut-off @ PC6"),
+       col=c("blue"), lty=5, cex=0.6)
+
+plotdata <- as.data.frame(zenplayers.pr$x[,])
+
+
+axx <- list(title="1")
+axy <- list(title="2")
+axz <- list(title="3")
+
+zencl <- as.data.frame(plotdata[1:3])
+km <-kmeans(zencl, centers = 3, nstart=25)
+zencl$cluster = factor(km$cluster)
+
+p <- plot_ly(plotdata, x=~PC1, y=~PC2, z=~PC3, text=zenplayers$player,color = zencl$cluster) %>%
+     add_markers() %>%
+  layout(scene = list(xaxis=axx,yaxis=axy,zaxis=axz), title = 'zen Playstyles', plot_bgcolor = "#e5ecf6")
+print(p)
+
+
+htmlwidgets::saveWidget(as_widget(p), "zen.html")
+
+```
+
+```{r}
+
+cassplayers <- herodf %>%
+  filter(hero == "McCree")%>%
+ select(where(~ any(. != 0)))%>%
+  select(-envkills, -blk, -healing)
+
+ncol <- ncol(cassplayers)
+
+cassplayers.pr <- prcomp(cassplayers[,3:((ncol))],
+             center = TRUE,
+             scale. = TRUE)
+
+screeplot(cassplayers.pr, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
+abline(h = 1, col="red", lty=5)
+legend("topright", legend=c("Eigenvalue = 1"),
+       col=c("red"), lty=5, cex=0.6)
+cumpro <- cumsum(cassplayers.pr$sdev^2 / sum(cassplayers.pr$sdev^2))
+plot(cumpro[0:15], xlab = "PC #", ylab = "Amount of explained variance", main = "Cumulative variance plot")
+abline(v = 3, col="blue", lty=5)
+abline(h = 0.7308, col="blue", lty=5)
+legend("topleft", legend=c("Cut-off @ PC6"),
+       col=c("blue"), lty=5, cex=0.6)
+
+plotdata <- as.data.frame(cassplayers.pr$x[,])
+
+
+axx <- list(title="1")
+axy <- list(title="2")
+axz <- list(title="3")
+
+casscl <- as.data.frame(plotdata[1:3])
+km <-kmeans(casscl, centers = 3, nstart=25)
+casscl$cluster = factor(km$cluster)
+
+p <- plot_ly(plotdata, x=~PC1, y=~PC2, z=~PC3, text=cassplayers$player,color = casscl$cluster) %>%
+     add_markers() %>%
+  layout(scene = list(xaxis=axx,yaxis=axy,zaxis=axz), title = 'cass Playstyles', plot_bgcolor = "#e5ecf6")
+print(p)
+
+
+htmlwidgets::saveWidget(as_widget(p), "cass.html")
+
+```
+
+```{r}
+
+widowplayers <- herodf %>%
+  filter(hero == "Widowmaker")%>%
+ select(where(~ any(. != 0)))%>%
+  select(-envkills, -blk, -healing)
+
+ncol <- ncol(widowplayers)
+
+widowplayers.pr <- prcomp(widowplayers[,3:((ncol))],
+             center = TRUE,
+             scale. = TRUE)
+
+screeplot(widowplayers.pr, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
+abline(h = 1, col="red", lty=5)
+legend("topright", legend=c("Eigenvalue = 1"),
+       col=c("red"), lty=5, cex=0.6)
+cumpro <- cumsum(widowplayers.pr$sdev^2 / sum(widowplayers.pr$sdev^2))
+plot(cumpro[0:15], xlab = "PC #", ylab = "Amount of explained variance", main = "Cumulative variance plot")
+abline(v = 3, col="blue", lty=5)
+abline(h = 0.7308, col="blue", lty=5)
+legend("topleft", legend=c("Cut-off @ PC6"),
+       col=c("blue"), lty=5, cex=0.6)
+
+plotdata <- as.data.frame(widowplayers.pr$x[,])
+
+
+axx <- list(title="1")
+axy <- list(title="2")
+axz <- list(title="3")
+
+widowcl <- as.data.frame(plotdata[1:3])
+km <-kmeans(widowcl, centers = 3, nstart=25)
+widowcl$cluster = factor(km$cluster)
+
+p <- plot_ly(plotdata, x=~PC1, y=~PC2, z=~PC3, text=widowplayers$player,color = widowcl$cluster) %>%
+     add_markers() %>%
+  layout(scene = list(xaxis=axx,yaxis=axy,zaxis=axz), title = 'widow Playstyles', plot_bgcolor = "#e5ecf6")
+print(p)
+
+
+htmlwidgets::saveWidget(as_widget(p), "widow.html")
+
+```
+
+```{r}
+asheplayers <- herodf %>%
+  filter(hero == "Ashe")%>%
+ select(where(~ any(. != 0)))%>%
+  select(-envkills, -blk, -healing)
+
+ncol <- ncol(asheplayers)
+
+asheplayers.pr <- prcomp(asheplayers[,3:((ncol))],
+             center = TRUE,
+             scale. = TRUE)
+
+screeplot(asheplayers.pr, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
+abline(h = 1, col="red", lty=5)
+legend("topright", legend=c("Eigenvalue = 1"),
+       col=c("red"), lty=5, cex=0.6)
+cumpro <- cumsum(asheplayers.pr$sdev^2 / sum(asheplayers.pr$sdev^2))
+plot(cumpro[0:15], xlab = "PC #", ylab = "Amount of explained variance", main = "Cumulative variance plot")
+abline(v = 3, col="blue", lty=5)
+abline(h = 0.7308, col="blue", lty=5)
+legend("topleft", legend=c("Cut-off @ PC6"),
+       col=c("blue"), lty=5, cex=0.6)
+
+plotdata <- as.data.frame(asheplayers.pr$x[,])
+
+
+axx <- list(title="Individual Value (less is better)")
+axy <- list(title="Risky flank solo kill")
+axz <- list(title="Being alive(less is better)")
+
+ashecl <- as.data.frame(plotdata[1:3])
+km <-kmeans(ashecl, centers = 3, nstart=25)
+ashecl$cluster = factor(km$cluster)
+
+p <- plot_ly(plotdata, x=~PC1, y=~PC2, z=~PC3, text=asheplayers$player,color = ashecl$cluster) %>%
+     add_markers() %>%
+  layout(scene = list(xaxis=axx,yaxis=axy,zaxis=axz), title = 'ashe Playstyles', plot_bgcolor = "#e5ecf6")
+print(p)
+
+
+htmlwidgets::saveWidget(as_widget(p), "ashe.html")
+```
