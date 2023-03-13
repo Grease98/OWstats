@@ -1,0 +1,73 @@
+```{r}
+library(tidyverse)
+library(cluster)
+library(factoextra)
+library(plotly)
+
+library(shiny)
+```
+
+```{r}
+# Load the required packages
+library(shiny)
+library(plotly)
+
+# Define the UI for the Shiny app
+ui <- fluidPage(
+  
+  # Define the file input widget
+  fileInput("file", "Choose a CSV file"),
+  
+  # Define the x and y axis dropdown boxes
+  selectInput("x", "X Axis:", choices = NULL),
+  selectInput("y", "Y Axis:", choices = NULL),
+  
+  # Define the hero filter dropdown box
+  selectInput("hero", "Hero Filter:", choices = NULL),
+  
+  # Define the plot output widget
+  plotlyOutput("plot", width = "100%", height = "400px")
+)
+
+# Define the server for the Shiny app
+server <- function(input, output, session) {
+  
+  # Update the dropdown boxes with the column names from the selected file
+  observe({
+    if (!is.null(input$file)) {
+      df <- read.csv(input$file$datapath, header = TRUE)
+      updateSelectInput(session, "x", choices = names(df))
+      updateSelectInput(session, "y", choices = names(df))
+      updateSelectInput(session, "hero", choices = unique(df$hero))
+    }
+  })
+  
+  # Read the selected CSV file and plot the results
+  output$plot <- renderPlotly({
+    
+    # Check if a file has been selected
+    if (is.null(input$file)) {
+      return(NULL)
+    }
+    
+    # Read the selected file into a data frame
+    df <- read.csv(input$file$datapath, header = TRUE)
+    
+    # Filter the data frame by the selected hero
+    if (!is.null(input$hero)) {
+      df <- df[df$hero == input$hero,]
+    }
+    
+    # Create a scatter plot using Plotly
+    plot_ly(data = df, x = ~df[[input$x]], y = ~df[[input$y]], text = ~df$player,
+            type = "scatter", mode = "markers") %>%
+      layout(xaxis = list(title = input$x), yaxis = list(title = input$y))
+  })
+  
+}
+
+# Run the Shiny app
+shinyApp(ui, server)
+```
+
+
